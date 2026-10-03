@@ -80,7 +80,21 @@ export default function NewAdventureScreen() {
         body: { prompt: prompt.trim(), start: coords },
       });
 
-      if (fnError) throw fnError;
+      if (fnError) {
+        // FunctionsHttpError/FunctionsRelayError carry the real response on `.context`;
+        // fnError.message is just a generic "non-2xx status code" string otherwise.
+        const context = (fnError as { context?: Response }).context;
+        let message = fnError.message;
+        if (context) {
+          try {
+            const body = await context.json();
+            if (body?.error) message = body.error;
+          } catch {
+            // context wasn't JSON - fall back to fnError.message
+          }
+        }
+        throw new Error(message);
+      }
       if (!data?.adventure_id) throw new Error('No adventure returned');
 
       router.replace(`/adventure/${data.adventure_id}`);
