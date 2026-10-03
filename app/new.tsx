@@ -24,6 +24,11 @@ export default function NewAdventureScreen() {
   const [cityInput, setCityInput] = useState('');
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [showEnd, setShowEnd] = useState(false);
+  const [endCoords, setEndCoords] = useState<Coords | null>(null);
+  const [endCityInput, setEndCityInput] = useState('');
+  const [endLocating, setEndLocating] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +68,24 @@ export default function NewAdventureScreen() {
     }
   }
 
+  async function geocodeEndCity() {
+    if (!endCityInput.trim()) return;
+    setEndLocating(true);
+    setEndError(null);
+    try {
+      const results = await Location.geocodeAsync(endCityInput.trim());
+      if (results.length === 0) {
+        setEndError("Couldn't find that place. Try a more specific address.");
+        return;
+      }
+      setEndCoords({ lat: results[0].latitude, lng: results[0].longitude });
+    } catch {
+      setEndError('Geocoding failed. Try again.');
+    } finally {
+      setEndLocating(false);
+    }
+  }
+
   async function handleGenerate() {
     if (!prompt.trim()) {
       setError('Describe your adventure first (time, budget, interests).');
@@ -77,7 +100,7 @@ export default function NewAdventureScreen() {
     setError(null);
     try {
       const { data, error: fnError } = await supabase.functions.invoke('generate-adventure', {
-        body: { prompt: prompt.trim(), start: coords },
+        body: { prompt: prompt.trim(), start: coords, destination: endCoords ?? null },
       });
 
       if (fnError) {
@@ -161,6 +184,51 @@ export default function NewAdventureScreen() {
               </View>
               {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
             </>
+          )}
+
+          {showEnd ? (
+            <>
+              <Text style={styles.label}>Ending point</Text>
+              {endCoords ? (
+                <View style={styles.coordsBadge}>
+                  <Text style={styles.coordsText}>
+                    🏁 {endCoords.lat.toFixed(4)}, {endCoords.lng.toFixed(4)}
+                  </Text>
+                  <Pressable onPress={() => setEndCoords(null)}>
+                    <Text style={styles.changeLink}>change</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.row}>
+                  <TextInput
+                    value={endCityInput}
+                    onChangeText={setEndCityInput}
+                    placeholder="Where you'll end up"
+                    placeholderTextColor={colors.toast}
+                    style={styles.cityInput}
+                    onSubmitEditing={geocodeEndCity}
+                    returnKeyType="done"
+                  />
+                  <Pressable style={styles.goButton} onPress={geocodeEndCity} disabled={endLocating}>
+                    {endLocating ? <ActivityIndicator color={colors.white} /> : <Text style={styles.goButtonText}>Go</Text>}
+                  </Pressable>
+                </View>
+              )}
+              {endError ? <Text style={styles.error}>{endError}</Text> : null}
+              <Pressable
+                onPress={() => {
+                  setShowEnd(false);
+                  setEndCoords(null);
+                  setEndError(null);
+                }}
+              >
+                <Text style={styles.orText}>remove ending point</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable onPress={() => setShowEnd(true)}>
+              <Text style={styles.addEndLink}>+ Add an ending point (optional)</Text>
+            </Pressable>
           )}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -253,6 +321,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   coordsText: { fontFamily: typography.body, color: colors.ink },
+  addEndLink: {
+    fontFamily: typography.bodyBold,
+    color: colors.primary,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
   changeLink: { fontFamily: typography.bodyBold, color: colors.primary },
   error: { color: colors.danger, fontFamily: typography.body, marginTop: spacing.xs },
   cta: {

@@ -1,4 +1,4 @@
-import type { PlaceCandidate } from "./types.ts";
+import type { CategoryQuery, PlaceCandidate } from "./types.ts";
 
 const FIELD_MASK = [
   "places.id",
@@ -36,7 +36,9 @@ type TextSearchResponse = {
 };
 
 async function searchOneQuery(
+  category: string,
   query: string,
+  maxResults: number,
   center: { lat: number; lng: number },
   radiusMeters: number,
   apiKey: string
@@ -50,7 +52,7 @@ async function searchOneQuery(
     },
     body: JSON.stringify({
       textQuery: query,
-      maxResultCount: 10,
+      maxResultCount: Math.max(maxResults * 3, 5), // overfetch, then cap per-category below
       locationBias: {
         circle: {
           center: { latitude: center.lat, longitude: center.lng },
@@ -71,9 +73,11 @@ async function searchOneQuery(
     .filter((p) => p.businessStatus === undefined || p.businessStatus === "OPERATIONAL")
     .filter((p) => p.currentOpeningHours?.openNow !== false)
     .filter((p) => p.location && p.displayName)
+    .slice(0, maxResults)
     .map((p) => ({
       place_id: p.id,
       name: p.displayName!.text,
+      category,
       lat: p.location!.latitude,
       lng: p.location!.longitude,
       address: p.formattedAddress ?? null,
@@ -84,7 +88,7 @@ async function searchOneQuery(
 }
 
 export async function searchCandidates(
-  queries: string[],
+  queries: CategoryQuery[],
   center: { lat: number; lng: number },
   radiusKm: number
 ): Promise<PlaceCandidate[]> {
@@ -93,7 +97,7 @@ export async function searchCandidates(
 
   const radiusMeters = Math.round(radiusKm * 1000);
   const results = await Promise.all(
-    queries.map((q) => searchOneQuery(q, center, radiusMeters, apiKey))
+    queries.map((q) => searchOneQuery(q.category, q.query, q.max_results, center, radiusMeters, apiKey))
   );
 
   const seen = new Map<string, PlaceCandidate>();

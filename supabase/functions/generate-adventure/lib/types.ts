@@ -7,17 +7,25 @@ export type GenerateAdventureInput = {
   interests?: string[];
 };
 
+export type CategoryQuery = {
+  category: string;
+  query: string;
+  max_results: number;
+};
+
 export type Interpretation = {
   time_minutes: number;
   budget: number | null;
   interests: string[];
-  search_queries: string[];
+  target_stop_count: number;
+  queries: CategoryQuery[];
   radius_km: number;
 };
 
 export type PlaceCandidate = {
   place_id: string;
   name: string;
+  category: string;
   lat: number;
   lng: number;
   address: string | null;

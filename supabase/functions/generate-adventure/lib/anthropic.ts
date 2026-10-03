@@ -6,12 +6,19 @@ import type { Interpretation, Plan, PlaceCandidate } from "./types.ts";
 const client = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
 const MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-haiku-4-5";
 
+const CategoryQuerySchema = z.object({
+  category: z.string(),
+  query: z.string(),
+  max_results: z.number().int().min(1).max(3),
+});
+
 const InterpretationSchema = z.object({
-  time_minutes: z.number().int().min(15).max(480),
+  time_minutes: z.number().int().min(5).max(480),
   budget: z.number().min(0).nullable(),
   interests: z.array(z.string()).min(1).max(6),
-  search_queries: z.array(z.string()).min(3).max(5),
-  radius_km: z.number().min(0.5).max(10),
+  target_stop_count: z.number().int().min(1).max(6),
+  queries: z.array(CategoryQuerySchema).min(1).max(5),
+  radius_km: z.number().min(0.2).max(10),
 });
 
 const PlanSchema = z.object({
@@ -28,7 +35,7 @@ const PlanSchema = z.object({
         challenge: z.string().nullable(),
       })
     )
-    .min(3)
+    .min(1)
     .max(6),
 });
 
@@ -42,11 +49,31 @@ export async function interpretPrompt(input: {
     model: MODEL,
     max_tokens: 1024,
     system:
-      "You turn a free-text adventure request into structured constraints and Google Places " +
-      "text-search queries. Infer missing details reasonably (e.g. 'a quick trip' is ~60 minutes). " +
-      "search_queries should be specific and varied (e.g. 'independent bookstore', 'scenic viewpoint', " +
-      "'cheap dumplings'), not generic terms like 'things to do'. radius_km should scale with time_minutes " +
-      "for a walking trip: ~1.5km for 60 minutes, up to ~4km for 180+ minutes.",
+      "You turn a free-text adventure request into structured constraints and a small set of " +
+      "categorized Google Places text-search queries. Infer missing details reasonably (e.g. 'a " +
+      "quick trip' is ~30 minutes).\n\n" +
+      "target_stop_count scales with time_minutes - this is a MicroQuest system, not always a " +
+      "multi-stop trip:\n" +
+      "- 5-15 minutes -> 1 stop\n" +
+      "- 16-45 minutes -> 2-3 stops\n" +
+      "- 46-90 minutes -> 3-4 stops\n" +
+      "- 90+ minutes -> 4-6 stops\n\n" +
+      "queries: each entry is one category (e.g. 'food', 'nature', 'shopping', 'culture', " +
+      "'landmark', 'activity', 'dessert') with ONE specific Google Places query (e.g. 'independent " +
+      "bookstore', 'scenic viewpoint', 'cheap dumplings' - never generic terms like 'things to do') " +
+      "and max_results (almost always 1, at most 2). Produce 3-5 DIFFERENT categories so the final " +
+      "trip has variety - never produce more than one 'food' category query even if the user asks " +
+      "to eat, since one good candidate is enough and the planner will add a dessert/drink/activity " +
+      "around it if time allows.\n\n" +
+      "radius_km should scale with time_minutes for a walking trip: as low as 0.2-0.4km for a " +
+      "10-minute MicroQuest, ~1.5km for 60 minutes, up to ~4km for 180+ minutes.\n\n" +
+      "Google's location bias is a soft ranking hint, not a hard radius - an unusual or rare query " +
+      "(e.g. 'hidden gem mural', 'quirky local attraction') often returns its best match from far " +
+      "outside a small radius because nothing common matches nearby. For short MicroQuests " +
+      "(time_minutes under ~30) prefer common, concrete terms that are likely to exist within a few " +
+      "hundred meters of anywhere (e.g. 'park', 'coffee shop', 'public art', 'historic building', " +
+      "'garden') over flowery or rare phrasing - common terms find the CLOSE option, rare phrasing " +
+      "finds the BEST option regardless of distance.",
     messages: [
       {
         role: "user",
@@ -71,21 +98,28 @@ export async function planAdventure(input: {
   prompt: string;
   interpretation: Interpretation;
   candidates: PlaceCandidate[];
+  retryNote?: string;
 }): Promise<Plan> {
+  const maxStops = Math.min(input.interpretation.target_stop_count, input.candidates.length);
+
   const response = await client.messages.parse({
     model: MODEL,
     max_tokens: 2048,
     system:
       "You design a short walking adventure from a fixed list of real places. Rules:\n" +
       "- Only use place_id values from the candidates list given to you. Never invent a place_id.\n" +
-      "- Pick 3-6 stops and order them into a sensible walking route (minimize backtracking).\n" +
+      `- Pick up to ${maxStops} stop(s) - never more than the number of candidates given, and never ` +
+      "more than one stop whose category is 'food' or a close synonym (e.g. restaurant, cafe, " +
+      "dessert) unless there are fewer than 2 non-food candidates available. A single great stop " +
+      "with a photo challenge is a perfectly good short adventure - don't pad it with filler stops.\n" +
+      "- Order stops into a sensible walking route (minimize backtracking).\n" +
       "- Write a fun, upbeat title and a 1-2 sentence summary for the whole adventure.\n" +
       "- Write a one-line description per stop in a warm, playful voice.\n" +
       "- Add a short, playful photo challenge (doable by any group, e.g. 'Capture something in motion', " +
-      "'Get everyone in one photo', 'Find the oldest-looking thing here') to about half the stops; set " +
-      "challenge to null for the rest.\n" +
+      "'Get everyone in one photo', 'Find the oldest-looking thing here') to about half the stops " +
+      "(always to the stop if there's only one); set challenge to null for the rest.\n" +
       "- est_minutes and est_cost per stop should roughly sum to the user's time_minutes and budget.\n" +
-      "- Prefer variety across stop types over repeating the same category.",
+      "- Prefer variety across stop categories over repeating the same one.",
     messages: [
       {
         role: "user",
@@ -93,6 +127,7 @@ export async function planAdventure(input: {
           original_prompt: input.prompt,
           constraints: input.interpretation,
           candidates: input.candidates,
+          ...(input.retryNote ? { retry_note: input.retryNote } : {}),
         }),
       },
     ],

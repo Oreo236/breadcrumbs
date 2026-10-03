@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Callout, Marker, Polyline } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import { colors, radius, spacing, typography } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { decodePolyline } from '@/lib/polyline';
+import { Mascot } from '@/components/Mascot';
 
 type Stop = {
   id: string;
@@ -48,6 +49,7 @@ export default function AdventureScreen() {
 
   const [adventure, setAdventure] = useState<Adventure | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
+  const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
@@ -55,11 +57,15 @@ export default function AdventureScreen() {
 
   const load = useCallback(async () => {
     setError(null);
-    const [{ data: adventureData, error: adventureError }, { data: stopsData, error: stopsError }] =
-      await Promise.all([
-        supabase.from('adventures').select('*').eq('id', id).single(),
-        supabase.from('stops').select('*').eq('adventure_id', id).order('order_index'),
-      ]);
+    const [
+      { data: adventureData, error: adventureError },
+      { data: stopsData, error: stopsError },
+      { data: photoRows, error: photoError },
+    ] = await Promise.all([
+      supabase.from('adventures').select('*').eq('id', id).single(),
+      supabase.from('stops').select('*').eq('adventure_id', id).order('order_index'),
+      supabase.from('photos').select('stop_id').eq('adventure_id', id),
+    ]);
 
     if (adventureError) {
       setError(adventureError.message);
@@ -71,6 +77,14 @@ export default function AdventureScreen() {
     }
     setAdventure(adventureData);
     setStops(stopsData ?? []);
+
+    if (!photoError) {
+      const counts: Record<string, number> = {};
+      for (const row of photoRows ?? []) {
+        counts[row.stop_id] = (counts[row.stop_id] ?? 0) + 1;
+      }
+      setPhotoCounts(counts);
+    }
   }, [id]);
 
   useFocusEffect(
@@ -123,6 +137,17 @@ export default function AdventureScreen() {
     ? decodePolyline(adventure.route_polyline)
     : stops.map((s) => ({ latitude: s.lat, longitude: s.lng }));
 
+  // Consecutive dropped stops get a brighter dotted overlay on top of the muted planned trail.
+  const droppedSegments: { latitude: number; longitude: number }[][] = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (stops[i].dropped_at && stops[i + 1].dropped_at) {
+      droppedSegments.push([
+        { latitude: stops[i].lat, longitude: stops[i].lng },
+        { latitude: stops[i + 1].lat, longitude: stops[i + 1].lng },
+      ]);
+    }
+  }
+
   const isOwner = session?.user.id === adventure.owner_id;
 
   return (
@@ -140,16 +165,45 @@ export default function AdventureScreen() {
             }}
           >
             {routePoints.length > 1 ? (
-              <Polyline coordinates={routePoints} strokeColor={colors.primary} strokeWidth={4} />
+              <Polyline
+                coordinates={routePoints}
+                strokeColor={colors.outline}
+                strokeWidth={4}
+                lineDashPattern={[2, 8]}
+                lineCap="round"
+              />
             ) : null}
-            {stops.map((stop) => (
-              <Marker
-                key={stop.id}
-                coordinate={{ latitude: stop.lat, longitude: stop.lng }}
-                title={`${stop.order_index + 1}. ${stop.name}`}
-                pinColor={stop.dropped_at ? colors.blush : colors.primary}
+            {droppedSegments.map((segment, i) => (
+              <Polyline
+                key={`dropped-${i}`}
+                coordinates={segment}
+                strokeColor={colors.blush}
+                strokeWidth={5}
+                lineDashPattern={[2, 6]}
+                lineCap="round"
               />
             ))}
+            {stops.map((stop) =>
+              stop.dropped_at ? (
+                <Marker key={stop.id} coordinate={{ latitude: stop.lat, longitude: stop.lng }} anchor={{ x: 0.5, y: 0.5 }}>
+                  <View style={styles.breadMarker}>
+                    <Mascot size={36} mood="excited" />
+                  </View>
+                  <Callout>
+                    <Text style={styles.calloutText}>
+                      {stop.name} — 📸 {photoCounts[stop.id] ?? 0} photo{(photoCounts[stop.id] ?? 0) === 1 ? '' : 's'}
+                    </Text>
+                  </Callout>
+                </Marker>
+              ) : (
+                <Marker
+                  key={stop.id}
+                  coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+                  title={`${stop.order_index + 1}. ${stop.name}`}
+                  pinColor={colors.primary}
+                />
+              )
+            )}
           </MapView>
 
           <View style={styles.header}>
@@ -259,6 +313,17 @@ const styles = StyleSheet.create({
   stopName: { fontFamily: typography.bodyBold, fontSize: 15, color: colors.ink },
   stopDescription: { fontFamily: typography.body, fontSize: 13, color: colors.toast, marginTop: 2 },
   droppedBadge: { fontSize: 20 },
+  breadMarker: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.blush,
+  },
+  calloutText: { fontFamily: typography.body, fontSize: 13, color: colors.ink, maxWidth: 180 },
   finishButton: {
     backgroundColor: colors.primary,
     borderRadius: radius.lg,

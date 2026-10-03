@@ -21,6 +21,13 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+const FOOD_CATEGORY_WORDS = ["food", "restaurant", "cafe", "café", "dining", "cuisine", "eat", "dessert", "drink", "bar"];
+
+function isFoodCategory(category: string): boolean {
+  const lower = category.toLowerCase();
+  return FOOD_CATEGORY_WORDS.some((word) => lower.includes(word));
+}
+
 function isValidInput(body: unknown): body is GenerateAdventureInput {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
@@ -94,42 +101,74 @@ Deno.serve(async (req) => {
       interests: input.interests,
     });
 
-    const center = input.destination ?? input.start;
-    const candidates = await searchCandidates(
-      interpretation.search_queries,
-      center,
-      interpretation.radius_km
-    );
+    const center = input.destination
+      ? {
+          lat: (input.start.lat + input.destination.lat) / 2,
+          lng: (input.start.lng + input.destination.lng) / 2,
+        }
+      : input.start;
 
-    // Drop anything well outside the intended radius (location bias is a soft hint, not a hard filter).
-    const maxDistanceKm = interpretation.radius_km * 1.5;
-    const filteredCandidates = candidates.filter(
-      (c) => distanceKm(center, { lat: c.lat, lng: c.lng }) <= maxDistanceKm
-    );
+    // locationBias is a soft ranking hint, not a hard radius restriction - for an unusual or rare
+    // query Google may return its best match from well outside the requested circle. Prefer
+    // candidates within the intended radius, but if none qualify, fall back to the closest raw
+    // results rather than erroring - a MicroQuest should almost always find something.
+    const candidates = await searchCandidates(interpretation.queries, center, interpretation.radius_km);
 
-    if (filteredCandidates.length < 3) {
+    if (candidates.length === 0) {
       return jsonResponse(
-        { error: "Couldn't find enough places nearby. Try loosening your constraints." },
+        { error: "Couldn't find anything nearby. Try loosening your constraints." },
         422
       );
     }
 
+    const withDistance = candidates
+      .map((c) => ({ candidate: c, distance: distanceKm(center, { lat: c.lat, lng: c.lng }) }))
+      .sort((a, b) => a.distance - b.distance);
+
+    const maxDistanceKm = interpretation.radius_km * 1.5;
+    const withinRadius = withDistance.filter((c) => c.distance <= maxDistanceKm).map((c) => c.candidate);
+
+    const CLOSEST_FALLBACK_COUNT = 5;
+    const filteredCandidates =
+      withinRadius.length > 0 ? withinRadius : withDistance.slice(0, CLOSEST_FALLBACK_COUNT).map((c) => c.candidate);
+
     const candidateIds = new Set(filteredCandidates.map((c) => c.place_id));
+    const categoryByPlaceId = new Map(filteredCandidates.map((c) => [c.place_id, c.category]));
+    const FOOD_STOP_CAP = 2;
+
+    function validatePlan(candidatePlan: Plan): string | null {
+      const invalidIds = candidatePlan.stops.filter((s) => !candidateIds.has(s.place_id));
+      if (invalidIds.length > 0) {
+        return `You used place_id(s) that weren't in the candidates list: ${invalidIds
+          .map((s) => s.place_id)
+          .join(", ")}. Only use place_id values from the candidates given to you.`;
+      }
+      const foodStopCount = candidatePlan.stops.filter((s) =>
+        isFoodCategory(categoryByPlaceId.get(s.place_id) ?? "")
+      ).length;
+      if (foodStopCount > FOOD_STOP_CAP) {
+        return `Your plan had ${foodStopCount} food/drink stops, which is too many (max ${FOOD_STOP_CAP}). Keep at most ${FOOD_STOP_CAP} and vary the other stops across different categories.`;
+      }
+      return null;
+    }
 
     let plan: Plan | null = null;
+    let retryNote: string | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
       const candidatePlan = await planAdventure({
         prompt: input.prompt,
         interpretation,
         candidates: filteredCandidates,
+        retryNote,
       });
 
-      const allValid = candidatePlan.stops.every((s) => candidateIds.has(s.place_id));
-      if (allValid) {
+      const issue = validatePlan(candidatePlan);
+      if (!issue) {
         plan = candidatePlan;
         break;
       }
-      console.warn(`Plan attempt ${attempt} contained invalid place_id(s), retrying`);
+      console.warn(`Plan attempt ${attempt} invalid: ${issue}`);
+      retryNote = issue;
     }
 
     if (!plan) {
@@ -145,9 +184,12 @@ Deno.serve(async (req) => {
       place: filteredCandidates.find((c) => c.place_id === stop.place_id)!,
     }));
 
-    const polyline = await getWalkingPolyline(
-      stopsWithPlaces.map(({ place }) => ({ lat: place.lat, lng: place.lng }))
-    );
+    const routeWaypoints = [
+      input.start,
+      ...stopsWithPlaces.map(({ place }) => ({ lat: place.lat, lng: place.lng })),
+      ...(input.destination ? [input.destination] : []),
+    ];
+    const polyline = await getWalkingPolyline(routeWaypoints);
 
     // Insert the adventure, retrying the join code on the rare collision.
     let adventureId: string | null = null;
