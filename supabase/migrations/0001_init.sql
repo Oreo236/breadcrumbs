@@ -120,10 +120,13 @@ create policy "users can update their own profile"
   using (id = auth.uid());
 
 -- adventures
-create policy "members can read their adventures"
+-- Owner is checked directly (not just is_adventure_member) because
+-- insert().select() does an immediate read-back of the new row, before the
+-- owner has been added to adventure_members - without this it would fail RLS.
+create policy "owner or member can read their adventures"
   on adventures for select
   to authenticated
-  using (is_adventure_member(id));
+  using (owner_id = auth.uid() or is_adventure_member(id));
 
 create policy "owner can insert adventures"
   on adventures for insert
