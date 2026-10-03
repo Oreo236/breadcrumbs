@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Breadcrumbs",
+    "slug": "breadcrumbs-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "breadcrumbsapp",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Breadcrumbs uses your location to build adventures starting near you.",
+        "NSCameraUsageDescription": "Breadcrumbs uses your camera to drop photo Breadcrumbs at stops.",
+        "NSPhotoLibraryUsageDescription": "Breadcrumbs lets you pick photos from your library to drop Breadcrumbs at stops."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF4DE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FFF4DE"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Breadcrumbs uses your location to build adventures starting near you."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Breadcrumbs lets you pick photos from your library to drop Breadcrumbs at stops.",
+          "cameraPermission": "Breadcrumbs uses your camera to drop photo Breadcrumbs at stops."
+        }
+      ],
+      "expo-image",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
