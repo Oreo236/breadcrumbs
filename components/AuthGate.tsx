@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { Mascot } from '@/components/Mascot';
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { loading, error, profile } = useAuth();
@@ -56,7 +57,7 @@ function NamePrompt() {
 
   return (
     <SafeAreaView style={styles.center}>
-      <Text style={styles.emoji}>🍞</Text>
+      <Mascot size={96} mood="content" />
       <Text style={styles.title}>Welcome to Breadcrumbs</Text>
       <Text style={styles.body}>What should we call you?</Text>
       <TextInput
@@ -89,10 +90,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.cream,
     padding: spacing.lg,
-  },
-  emoji: {
-    fontSize: 56,
-    marginBottom: spacing.md,
   },
   title: {
     fontFamily: typography.display,
