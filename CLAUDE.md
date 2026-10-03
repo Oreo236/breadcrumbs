@@ -255,14 +255,14 @@ Claude must treat the time as scarce:
 Check off as completed. Each milestone should end in a working, testable state.
 
 0. [x] **Repo + brand research:** Git repo on GitHub with `.gitignore` and `.env.example`; visual research summary (Section 11); pick a logo direction; `theme.ts` with palette and fonts.
-1. [ ] **Setup:** Expo app with Router and tabs runs in Expo Go; Supabase project; tables + RLS; anonymous auth + name prompt.
-2. [ ] **Generation:** `generate-adventure` Edge Function works via curl with real Places + AI; saves to DB.
-3. [ ] **New adventure screen:** Prompt → loading → navigates to the adventure.
-4. [ ] **Route screen:** Map with trail + stops; stop list; Directions deep link.
-5. [ ] **Stop + photos:** Challenge display, camera/library upload to Storage, photo grid, drop Breadcrumb.
-6. [ ] **Collaboration:** Join code + QR; second account can view and add photos.
-7. [ ] **Finish + album:** Complete adventure; album recap screen.
-8. [ ] **Memory map:** Profile map with adventure pins → album.
+1. [~] **Setup:** Expo app with Router and tabs runs in Expo Go; Supabase project; tables + RLS; anonymous auth + name prompt. Code done, **blocked**: Supabase project reports anonymous sign-ins disabled despite dashboard toggle being on — needs re-check.
+2. [~] **Generation:** `generate-adventure` Edge Function works via curl with real Places + AI; saves to DB. Code done, auth/validation paths smoke-tested locally via `deno run`; full pipeline (Places + Haiku + save) not yet exercised end-to-end — needs a real user JWT once anon auth works.
+3. [~] **New adventure screen:** Prompt → loading → navigates to the adventure. Built, not yet tested live (blocked on M1/M2 above).
+4. [~] **Route screen:** Map with trail + stops; stop list; Directions deep link. Built, not yet tested live.
+5. [~] **Stop + photos:** Challenge display, camera/library upload to Storage, photo grid, drop Breadcrumb. Built, not yet tested live.
+6. [ ] **Collaboration:** Join code + QR; second account can view and add photos. QR display + join-by-code built; QR *scanning* not built (typed code only, per the cut list).
+7. [~] **Finish + album:** Complete adventure; album recap screen. Built, not yet tested live.
+8. [~] **Memory map:** Profile map with adventure pins → album. Built, not yet tested live.
 9. [ ] **Hardening:** Location fallback, error states, empty states, rate limit, test on two phones.
 10. [ ] **Polish + demo:** Apply final mascot/logo, app icon/splash, favicon, animations, seed account, record a backup demo video. Tag `demo-ready`.
 
@@ -392,5 +392,10 @@ All of these work in **Expo Go**. Install with `npx expo install <package>` so v
 | Time | Milestone | Status / Notes | Last push |
 |---|---|---|---|
 | Sat 11:00 AM | M0 started | Repo scaffolded with Expo Router tabs template; brand direction picked | pending |
+| Sat 11:20 AM | M0/M1 | Supabase schema + RLS migration, anonymous auth gate, theme tokens. Fixed a git mishap (scaffold copy briefly overwrote `.git`; recovered, no data lost). | 767fd38 |
+| Sat ~12:30-1:30 PM | M1 testing blocked | Supabase project created, migration applied, keys in `.env`. Expo dev server only reachable via tunnel mode (phone's hotspot-to-laptop link is point-to-point NAT, not a real LAN) — tunnel itself flaky. Then found **Supabase reports anonymous sign-ins disabled** server-side even though the dashboard toggle was switched on — blocks live testing of the auth gate. Needs re-check next session. | 767fd38 |
+| Sat ~1:30-3:00 PM | M2-M5, M7, M8 built (untested) | User stepped away ~1-2h. Built `generate-adventure` edge function (Haiku 4.5 + structured outputs, Places Text Search, optional Routes polyline, place_id hallucination guard + 1 retry, rate limit); New Adventure screen; Route screen (map/trail/stops/invite QR/finish); Stop screen (challenge, Directions, camera/library upload, drop Breadcrumb); Album screen; Memory Map with real pins. Smoke-tested the function's auth/validation branches locally via `deno run` (real Supabase project, fake/missing JWTs) — passed. Could not test the full generation pipeline or any screen live: blocked on the anonymous-auth issue above. `tsc` and `expo-doctor` clean throughout. | 3367f55 |
+
+**Next session should start by:** (1) re-checking the Supabase anonymous-sign-ins toggle (it reported disabled via the API even after being switched on in the dashboard — may need a page refresh/save retry, or could be an org-level setting overriding it), (2) getting the phone on a real network for Expo Go testing, (3) only then testing M1-M8 live for the first time.
 
 @AGENTS.md
