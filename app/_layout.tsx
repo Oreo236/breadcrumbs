@@ -56,9 +56,15 @@ function RootLayoutNav() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
         <AuthGate>
-          <Stack>
+          {/* Explicit titles/back labels so the header never falls back to the raw route name.
+              Screens override `title` with the real adventure/stop name once loaded. */}
+          <Stack screenOptions={{ headerBackTitle: 'Back' }}>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="new" options={{ title: 'Plan an adventure' }} />
+            <Stack.Screen name="adventure/[id]/index" options={{ title: 'Adventure' }} />
+            <Stack.Screen name="adventure/[id]/album" options={{ title: 'Album' }} />
+            <Stack.Screen name="adventure/[id]/stop/[stopId]" options={{ title: 'Stop' }} />
           </Stack>
         </AuthGate>
       </AuthProvider>
