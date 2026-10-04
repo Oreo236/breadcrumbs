@@ -13,13 +13,34 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '@/constants/theme';
+import { CrumbDial, DialOption } from '@/components/CrumbDial';
 import { supabase } from '@/lib/supabase';
 
 type Coords = { lat: number; lng: number };
 
-// Quick-select chips; their text is appended to whatever the user typed when generating.
-const TIME_OPTIONS = ['15 minutes', '30 minutes', '1 hour', '2 hours', '3 hours'];
-const BUDGET_OPTIONS = ['free', '$10', '$25', '$50+'];
+// Dial options; the `prompt` text is appended to whatever the user typed when generating
+// (same wording the old chips used: "I have 1 hour." / "Budget: $10.").
+const TIME_OPTIONS: DialOption[] = [
+  { label: '10 min', prompt: '10 minutes' },
+  { label: '20 min', prompt: '20 minutes' },
+  { label: '30 min', prompt: '30 minutes' },
+  { label: '45 min', prompt: '45 minutes' },
+  { label: '1 hr', prompt: '1 hour' },
+  { label: '1.5 hr', prompt: '90 minutes' },
+  { label: '2 hr', prompt: '2 hours' },
+  { label: '3 hr', prompt: '3 hours' },
+  { label: '4 hr', prompt: '4 hours' },
+];
+const BUDGET_OPTIONS: DialOption[] = [
+  { label: 'Free', prompt: 'free' },
+  { label: '$5', prompt: '$5' },
+  { label: '$10', prompt: '$10' },
+  { label: '$20', prompt: '$20' },
+  { label: '$30', prompt: '$30' },
+  { label: '$50', prompt: '$50' },
+  { label: '$75', prompt: '$75' },
+  { label: '$100+', prompt: '$100+' },
+];
 const VIBE_OPTIONS = ['relaxing', 'food', 'cozy', 'scenic', 'shopping', 'exploring', 'active'];
 
 function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
@@ -181,18 +202,10 @@ export default function NewAdventureScreen() {
           />
 
           <Text style={styles.label}>How much time?</Text>
-          <View style={styles.chipRow}>
-            {TIME_OPTIONS.map((o) => (
-              <Chip key={o} label={o} selected={time === o} onPress={() => setTime(time === o ? null : o)} />
-            ))}
-          </View>
+          <CrumbDial options={TIME_OPTIONS} value={time} onChange={setTime} />
 
           <Text style={styles.label}>Budget</Text>
-          <View style={styles.chipRow}>
-            {BUDGET_OPTIONS.map((o) => (
-              <Chip key={o} label={o} selected={budget === o} onPress={() => setBudget(budget === o ? null : o)} />
-            ))}
-          </View>
+          <CrumbDial options={BUDGET_OPTIONS} value={budget} onChange={setBudget} />
 
           <Text style={styles.label}>Vibe</Text>
           <View style={styles.chipRow}>
