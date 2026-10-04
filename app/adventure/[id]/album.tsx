@@ -81,17 +81,23 @@ export default function AlbumScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <ActivityIndicator color={colors.primary} size="large" />
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ title: 'Album' }} />
+        <SafeAreaView style={styles.center} edges={['top']}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </SafeAreaView>
+      </>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <Text style={styles.errorText}>{error}</Text>
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ title: 'Album' }} />
+        <SafeAreaView style={styles.center} edges={['top']}>
+          <Text style={styles.errorText}>{error}</Text>
+        </SafeAreaView>
+      </>
     );
   }
 

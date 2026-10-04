@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { interpretPrompt, planAdventure } from "./lib/anthropic.ts";
 import { searchCandidates } from "./lib/places.ts";
-import { getWalkingPolyline } from "./lib/routes.ts";
+import { getWalkingDurationsMinutes, getWalkingPolyline } from "./lib/routes.ts";
 import { generateJoinCode } from "./lib/joinCode.ts";
 import { distanceKm } from "./lib/geo.ts";
 import type { GenerateAdventureInput, Plan } from "./lib/types.ts";
@@ -112,7 +112,22 @@ Deno.serve(async (req) => {
     // query Google may return its best match from well outside the requested circle. Prefer
     // candidates within the intended radius, but if none qualify, fall back to the closest raw
     // results rather than erroring - a MicroQuest should almost always find something.
-    const candidates = await searchCandidates(interpretation.queries, center, interpretation.radius_km);
+    let candidates = await searchCandidates(interpretation.queries, center, interpretation.radius_km);
+
+    // The LLM's chosen queries occasionally find nothing at all (an overly specific or locally
+    // nonexistent category) - fall back to broad, almost-always-populated terms over a wider
+    // radius before giving up entirely.
+    if (candidates.length === 0) {
+      candidates = await searchCandidates(
+        [
+          { category: "general", query: "point of interest", max_results: 5 },
+          { category: "general", query: "park", max_results: 3 },
+          { category: "general", query: "cafe", max_results: 3 },
+        ],
+        center,
+        interpretation.radius_km * 3
+      );
+    }
 
     if (candidates.length === 0) {
       return jsonResponse(
@@ -129,8 +144,43 @@ Deno.serve(async (req) => {
     const withinRadius = withDistance.filter((c) => c.distance <= maxDistanceKm).map((c) => c.candidate);
 
     const CLOSEST_FALLBACK_COUNT = 5;
-    const filteredCandidates =
+    const distanceFilteredCandidates =
       withinRadius.length > 0 ? withinRadius : withDistance.slice(0, CLOSEST_FALLBACK_COUNT).map((c) => c.candidate);
+
+    // Real walking time, not straight-line distance - a candidate can be close as the crow flies
+    // but much farther on foot (detours, no direct path, a river in between, etc).
+    const walkMinutes = await getWalkingDurationsMinutes(
+      input.start,
+      distanceFilteredCandidates.map((c) => ({ lat: c.lat, lng: c.lng }))
+    );
+    const candidatesWithWalkTime = distanceFilteredCandidates.map((c, i) => ({
+      ...c,
+      walk_minutes_from_start: walkMinutes[i],
+    }));
+
+    // Budget: reserve time per planned stop for the actual visit/photo, the rest is travel budget.
+    // Without an explicit end point, getting back to the start counts against that budget too.
+    // Short MicroQuests get a smaller per-stop reservation - "10 minutes" implies a quick glance
+    // and a photo, not an 8-minute stay that eats the whole budget before any walking happens.
+    const ACTIVITY_MINUTES_PER_STOP = interpretation.time_minutes <= 20 ? 3 : 8;
+    const travelBudgetMinutes = Math.max(
+      interpretation.time_minutes - interpretation.target_stop_count * ACTIVITY_MINUTES_PER_STOP,
+      2
+    );
+    // +15% tolerance - Google's walking estimate varies with routing/rounding, and a candidate
+    // that misses an exact cutoff by a few seconds shouldn't be treated as infeasible.
+    const maxOneWayMinutes = (input.destination ? travelBudgetMinutes : travelBudgetMinutes / 2) * 1.15;
+
+    const withinTimeBudget = candidatesWithWalkTime.filter(
+      (c) => c.walk_minutes_from_start == null || c.walk_minutes_from_start <= maxOneWayMinutes
+    );
+
+    const filteredCandidates =
+      withinTimeBudget.length > 0
+        ? withinTimeBudget
+        : [...candidatesWithWalkTime]
+            .sort((a, b) => (a.walk_minutes_from_start ?? Infinity) - (b.walk_minutes_from_start ?? Infinity))
+            .slice(0, CLOSEST_FALLBACK_COUNT);
 
     const candidateIds = new Set(filteredCandidates.map((c) => c.place_id));
     const categoryByPlaceId = new Map(filteredCandidates.map((c) => [c.place_id, c.category]));

@@ -32,6 +32,7 @@ export type PlaceCandidate = {
   rating: number | null;
   price_level: number | null;
   types: string[];
+  walk_minutes_from_start?: number | null;
 };
 
 export type PlannedStop = {

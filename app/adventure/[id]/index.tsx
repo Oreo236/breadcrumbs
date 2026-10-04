@@ -119,17 +119,23 @@ export default function AdventureScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <ActivityIndicator color={colors.primary} size="large" />
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ title: 'Adventure' }} />
+        <SafeAreaView style={styles.center} edges={['top']}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </SafeAreaView>
+      </>
     );
   }
 
   if (error || !adventure) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <Text style={styles.errorText}>{error ?? 'Adventure not found'}</Text>
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ title: 'Adventure' }} />
+        <SafeAreaView style={styles.center} edges={['top']}>
+          <Text style={styles.errorText}>{error ?? 'Adventure not found'}</Text>
+        </SafeAreaView>
+      </>
     );
   }
 

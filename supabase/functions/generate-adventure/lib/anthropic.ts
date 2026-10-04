@@ -17,7 +17,7 @@ const InterpretationSchema = z.object({
   budget: z.number().min(0).nullable(),
   interests: z.array(z.string()).min(1).max(6),
   target_stop_count: z.number().int().min(1).max(6),
-  queries: z.array(CategoryQuerySchema).min(1).max(5),
+  queries: z.array(CategoryQuerySchema).min(1).max(6),
   radius_km: z.number().min(0.2).max(10),
 });
 
@@ -61,10 +61,14 @@ export async function interpretPrompt(input: {
       "queries: each entry is one category (e.g. 'food', 'nature', 'shopping', 'culture', " +
       "'landmark', 'activity', 'dessert') with ONE specific Google Places query (e.g. 'independent " +
       "bookstore', 'scenic viewpoint', 'cheap dumplings' - never generic terms like 'things to do') " +
-      "and max_results (almost always 1, at most 2). Produce 3-5 DIFFERENT categories so the final " +
-      "trip has variety - never produce more than one 'food' category query even if the user asks " +
-      "to eat, since one good candidate is enough and the planner will add a dessert/drink/activity " +
-      "around it if time allows.\n\n" +
+      "and max_results. Produce AT MOST 5 queries total (never more - 5 is a hard limit), using as " +
+      "many different categories as fit within that limit - aim for the full 5 whenever " +
+      "target_stop_count is 4 or more, since a thin candidate pool means a real walking-time check " +
+      "later may leave too few options to actually build the trip. max_results is usually 1, but use " +
+      "2 on a non-food category when target_stop_count is high and candidates may be sparse. Never " +
+      "produce more than one 'food' category query even if the user asks to eat, since one good " +
+      "candidate is enough and the planner will add a dessert/drink/activity around it if time " +
+      "allows.\n\n" +
       "radius_km should scale with time_minutes for a walking trip: as low as 0.2-0.4km for a " +
       "10-minute MicroQuest, ~1.5km for 60 minutes, up to ~4km for 180+ minutes.\n\n" +
       "Google's location bias is a soft ranking hint, not a hard radius - an unusual or rare query " +
@@ -118,7 +122,12 @@ export async function planAdventure(input: {
       "- Add a short, playful photo challenge (doable by any group, e.g. 'Capture something in motion', " +
       "'Get everyone in one photo', 'Find the oldest-looking thing here') to about half the stops " +
       "(always to the stop if there's only one); set challenge to null for the rest.\n" +
-      "- est_minutes and est_cost per stop should roughly sum to the user's time_minutes and budget.\n" +
+      "- est_minutes and est_cost per stop should roughly sum to the user's time_minutes and budget. " +
+      "Each candidate has walk_minutes_from_start - the REAL walking time Google measured from the " +
+      "user's starting point, not a guess. Use it: the total of est_minutes plus the walking time " +
+      "between stops must fit inside time_minutes (remember the user has to walk back to the start " +
+      "too, unless an end point was given). Already-filtered candidates are time-feasible, but " +
+      "prefer the ones with lower walk_minutes_from_start when time is tight.\n" +
       "- Prefer variety across stop categories over repeating the same one.",
     messages: [
       {

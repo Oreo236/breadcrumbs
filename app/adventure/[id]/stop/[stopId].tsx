@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import {
@@ -123,8 +124,10 @@ export default function StopScreen() {
       const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
       const path = `${stop.adventure_id}/${stop.id}/${generateId()}.${ext}`;
 
-      const response = await fetch(asset.uri);
-      const arrayBuffer = await response.arrayBuffer();
+      // Reading via expo-file-system's File class (not global fetch) avoids a known RN/Hermes
+      // issue where fetch(uri).arrayBuffer() on a local file:// URI silently returns truncated
+      // or empty data, producing a broken image once uploaded.
+      const arrayBuffer = await new File(asset.uri).arrayBuffer();
 
       const { error: uploadError } = await supabase.storage
         .from('photos')
@@ -159,17 +162,23 @@ export default function StopScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <ActivityIndicator color={colors.primary} size="large" />
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ title: 'Stop' }} />
+        <SafeAreaView style={styles.center} edges={['top']}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </SafeAreaView>
+      </>
     );
   }
 
   if (error || !stop) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <Text style={styles.errorText}>{error ?? 'Stop not found'}</Text>
-      </SafeAreaView>
+      <>
+        <Stack.Screen options={{ title: 'Stop' }} />
+        <SafeAreaView style={styles.center} edges={['top']}>
+          <Text style={styles.errorText}>{error ?? 'Stop not found'}</Text>
+        </SafeAreaView>
+      </>
     );
   }
 
