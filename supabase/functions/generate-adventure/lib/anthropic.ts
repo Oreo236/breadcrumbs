@@ -102,6 +102,7 @@ export async function planAdventure(input: {
   prompt: string;
   interpretation: Interpretation;
   candidates: PlaceCandidate[];
+  suggestedMinutesPerStop: number;
   retryNote?: string;
 }): Promise<Plan> {
   const maxStops = Math.min(input.interpretation.target_stop_count, input.candidates.length);
@@ -123,11 +124,16 @@ export async function planAdventure(input: {
       "'Get everyone in one photo', 'Find the oldest-looking thing here') to about half the stops " +
       "(always to the stop if there's only one); set challenge to null for the rest.\n" +
       "- est_minutes and est_cost per stop should roughly sum to the user's time_minutes and budget. " +
-      "Each candidate has walk_minutes_from_start - the REAL walking time Google measured from the " +
-      "user's starting point, not a guess. Use it: the total of est_minutes plus the walking time " +
-      "between stops must fit inside time_minutes (remember the user has to walk back to the start " +
-      "too, unless an end point was given). Already-filtered candidates are time-feasible, but " +
-      "prefer the ones with lower walk_minutes_from_start when time is tight.\n" +
+      `suggested_minutes_per_stop (${input.suggestedMinutesPerStop}) is a calibrated default for ` +
+      "est_minutes - treat it as a strong anchor, not a suggestion you can ignore. You do NOT know the " +
+      "real walking time between stops (only walk_minutes_from_start, from the user's starting point - " +
+      "the candidates have already been restricted to ones mutually close to each other and the start, " +
+      "but that walking time still counts against the budget and is unknown to you), so you must leave " +
+      "room for it: keep most stops at or below suggested_minutes_per_stop, and only go meaningfully " +
+      "above it for a single stop that clearly warrants a longer visit (e.g. a park vs. a quick photo " +
+      "spot) - if you do, compensate by keeping the other stops shorter or using fewer stops. When in " +
+      "doubt, use LESS time per stop than you think, not more - real walking between stops routinely " +
+      "takes longer than expected (detours, terrain), and it is better to leave slack than to overrun.\n" +
       "- Prefer variety across stop categories over repeating the same one.",
     messages: [
       {
@@ -135,6 +141,7 @@ export async function planAdventure(input: {
         content: JSON.stringify({
           original_prompt: input.prompt,
           constraints: input.interpretation,
+          suggested_minutes_per_stop: input.suggestedMinutesPerStop,
           candidates: input.candidates,
           ...(input.retryNote ? { retry_note: input.retryNote } : {}),
         }),

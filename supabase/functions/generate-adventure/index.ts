@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { interpretPrompt, planAdventure } from "./lib/anthropic.ts";
 import { searchCandidates } from "./lib/places.ts";
-import { getWalkingDurationsMinutes, getWalkingPolyline } from "./lib/routes.ts";
+import { getWalkingDurationsMinutes, getWalkingRoute, getWalkingTimeMatrixMinutes } from "./lib/routes.ts";
 import { generateJoinCode } from "./lib/joinCode.ts";
 import { distanceKm } from "./lib/geo.ts";
 import type { GenerateAdventureInput, Plan } from "./lib/types.ts";
@@ -191,7 +191,7 @@ Deno.serve(async (req) => {
       closestByWalkTime.length > 0 &&
       (closestByWalkTime[0].walk_minutes_from_start ?? Infinity) <= maxOneWayMinutes * BEST_EFFORT_TOLERANCE;
 
-    const filteredCandidates =
+    let filteredCandidates =
       withinTimeBudget.length > 0
         ? withinTimeBudget
         : bestEffortFeasible
@@ -206,6 +206,44 @@ Deno.serve(async (req) => {
         },
         422
       );
+    }
+
+    // For multi-stop trips, a candidate being close to the START isn't enough - it also needs to
+    // be close to the OTHER candidates, or the LLM (which can't reliably judge geographic
+    // clustering from raw lat/lng alone) will happily combine stops that are each near the start
+    // but far from each other, blowing the total walking time even though every individual leg
+    // "fit". Straight-line distance is a bad proxy for this too - terrain (gorges, one-way
+    // bridges) can make two points close on a map take far longer to walk between than their
+    // straight-line distance suggests - so use real pairwise walking times and keep only the
+    // candidates mutually reachable from the start within a generous chunk of the travel budget.
+    // This is still just a pre-filter; the real authority is the whole-route Routes API check
+    // after planning, below.
+    if (interpretation.target_stop_count > 1 && filteredCandidates.length > 1) {
+      const points = [input.start, ...filteredCandidates.map((c) => ({ lat: c.lat, lng: c.lng }))];
+      const matrix = await getWalkingTimeMatrixMinutes(points);
+      const EDGE_TOLERANCE = 1.5;
+      const edgeThreshold = maxOneWayMinutes * EDGE_TOLERANCE;
+
+      const n = points.length;
+      const visited = new Array<boolean>(n).fill(false);
+      visited[0] = true;
+      const queue = [0];
+      while (queue.length > 0) {
+        const i = queue.shift()!;
+        for (let j = 0; j < n; j++) {
+          if (visited[j]) continue;
+          const d = matrix[i][j] ?? matrix[j][i];
+          if (d != null && d <= edgeThreshold) {
+            visited[j] = true;
+            queue.push(j);
+          }
+        }
+      }
+
+      const clustered = filteredCandidates.filter((_, idx) => visited[idx + 1]);
+      if (clustered.length >= 2) {
+        filteredCandidates = clustered;
+      }
     }
 
     const candidateIds = new Set(filteredCandidates.map((c) => c.place_id));
@@ -228,28 +266,73 @@ Deno.serve(async (req) => {
       return null;
     }
 
+    // A candidate being individually reachable from the start doesn't mean the WHOLE route fits -
+    // two stops can each be close to the start while being far from each other, so the real check
+    // has to be the actual multi-leg walking time through all chosen stops in order, not each
+    // stop's distance from the start alone (that per-candidate filter above is just a cheap
+    // pre-filter to shrink the candidate pool before asking the LLM to plan a route).
+    const ROUTE_TOTAL_TOLERANCE = 1.3; // 30% slack - est_minutes and walking estimates are fuzzy
+
     let plan: Plan | null = null;
+    let finalPolyline: string | null = null;
     let retryNote: string | undefined;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const candidatePlan = await planAdventure({
         prompt: input.prompt,
         interpretation,
         candidates: filteredCandidates,
+        suggestedMinutesPerStop: ACTIVITY_MINUTES_PER_STOP,
         retryNote,
       });
 
       const issue = validatePlan(candidatePlan);
-      if (!issue) {
-        plan = candidatePlan;
-        break;
+      if (issue) {
+        console.warn(`Plan attempt ${attempt} invalid: ${issue}`);
+        retryNote = issue;
+        continue;
       }
-      console.warn(`Plan attempt ${attempt} invalid: ${issue}`);
-      retryNote = issue;
+
+      const orderedStops = [...candidatePlan.stops].sort((a, b) => a.order_index - b.order_index);
+      const orderedPlaces = orderedStops.map((s) => filteredCandidates.find((c) => c.place_id === s.place_id)!);
+      const routeWaypoints = [
+        input.start,
+        ...orderedPlaces.map((p) => ({ lat: p.lat, lng: p.lng })),
+        input.destination ?? input.start,
+      ];
+      const { polyline, totalMinutes } = await getWalkingRoute(routeWaypoints);
+
+      const activityMinutes = orderedStops.reduce((sum, s) => sum + s.est_minutes, 0);
+      const estimatedTripMinutes = totalMinutes != null ? totalMinutes + activityMinutes : null;
+
+      if (estimatedTripMinutes != null && estimatedTripMinutes > interpretation.time_minutes * ROUTE_TOTAL_TOLERANCE) {
+        console.warn(
+          `Plan attempt ${attempt} route too long: ~${estimatedTripMinutes.toFixed(1)} min total vs ${interpretation.time_minutes} min budget`
+        );
+        const remainingForActivity = Math.max(interpretation.time_minutes - totalMinutes!, 0);
+        retryNote =
+          `Your planned route, visiting the stops in that order, would take about ${Math.round(estimatedTripMinutes)} ` +
+          `minutes total: ${Math.round(totalMinutes!)} minutes of real walking between stops (the stops you picked may ` +
+          "each be near the starting point individually but far from EACH OTHER) plus " +
+          `${Math.round(activityMinutes)} minutes of est_minutes you assigned across the stops. That's too long for the ` +
+          `${interpretation.time_minutes}-minute budget. The walking time is fixed by real geography, so you must fix ` +
+          `this by changing est_minutes and/or the number of stops: given ${Math.round(totalMinutes!)} minutes of ` +
+          `walking, you only have about ${Math.round(remainingForActivity)} minutes left to spend AT the stops combined ` +
+          "- lower each stop's est_minutes and/or drop a stop so the est_minutes values add up to roughly that much, " +
+          "or pick stops closer together to reduce the walking time instead.";
+        continue;
+      }
+
+      plan = candidatePlan;
+      finalPolyline = polyline;
+      break;
     }
 
     if (!plan) {
       return jsonResponse(
-        { error: "Couldn't build a valid route from the places we found. Try a different prompt." },
+        {
+          error:
+            "Couldn't build a route from these places that fits your time budget. Try a longer time limit or loosen your constraints.",
+        },
         422
       );
     }
@@ -259,13 +342,6 @@ Deno.serve(async (req) => {
       stop,
       place: filteredCandidates.find((c) => c.place_id === stop.place_id)!,
     }));
-
-    const routeWaypoints = [
-      input.start,
-      ...stopsWithPlaces.map(({ place }) => ({ lat: place.lat, lng: place.lng })),
-      ...(input.destination ? [input.destination] : []),
-    ];
-    const polyline = await getWalkingPolyline(routeWaypoints);
 
     // Insert the adventure, retrying the join code on the rare collision.
     let adventureId: string | null = null;
@@ -284,7 +360,7 @@ Deno.serve(async (req) => {
           },
           start_lat: input.start.lat,
           start_lng: input.start.lng,
-          route_polyline: polyline,
+          route_polyline: finalPolyline,
           status: "planned",
           join_code: generateJoinCode(),
         })
