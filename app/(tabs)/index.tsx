@@ -60,6 +60,9 @@ export default function HomeScreen() {
       <Pressable style={styles.cta} onPress={() => router.push('/new')}>
         <Text style={styles.ctaText}>🍞 Plan an adventure</Text>
       </Pressable>
+      <Pressable style={styles.secondaryCta} onPress={() => router.push('/custom')}>
+        <Text style={styles.secondaryCtaText}>📸 Add your own adventure</Text>
+      </Pressable>
 
       {loading ? (
         <ActivityIndicator style={styles.loader} color={colors.primary} />
@@ -104,6 +107,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ctaText: { fontFamily: typography.bodyBold, color: colors.white, fontSize: 17 },
+  secondaryCta: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+  },
+  secondaryCtaText: { fontFamily: typography.bodyBold, color: colors.primary, fontSize: 16 },
   loader: { marginTop: spacing.xl },
   error: { color: colors.danger, textAlign: 'center', marginTop: spacing.xl, fontFamily: typography.body },
   list: { padding: spacing.lg, gap: spacing.md },

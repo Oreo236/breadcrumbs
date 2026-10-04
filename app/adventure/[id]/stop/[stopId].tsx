@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import {
@@ -20,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, typography } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
-import { generateId } from '@/lib/id';
+import { uploadStopPhoto } from '@/lib/uploadPhoto';
 
 type StopDetail = {
   id: string;
@@ -166,28 +165,13 @@ export default function StopScreen() {
     setUploading(true);
     try {
       const asset = result.assets[0];
-      const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
-      const path = `${stop.adventure_id}/${stop.id}/${generateId()}.${ext}`;
-
-      // Reading via expo-file-system's File class (not global fetch) avoids a known RN/Hermes
-      // issue where fetch(uri).arrayBuffer() on a local file:// URI silently returns truncated
-      // or empty data, producing a broken image once uploaded.
-      const arrayBuffer = await new File(asset.uri).arrayBuffer();
-
-      const { error: uploadError } = await supabase.storage
-        .from('photos')
-        .upload(path, arrayBuffer, { contentType: asset.mimeType ?? 'image/jpeg' });
-      if (uploadError) throw uploadError;
-
-      const { error: insertError } = await supabase
-        .from('photos')
-        .insert({
-          adventure_id: stop.adventure_id,
-          stop_id: stop.id,
-          user_id: session.user.id,
-          storage_path: path,
-        });
-      if (insertError) throw insertError;
+      await uploadStopPhoto({
+        adventureId: stop.adventure_id,
+        stopId: stop.id,
+        userId: session.user.id,
+        uri: asset.uri,
+        mimeType: asset.mimeType,
+      });
 
       if (!stop.dropped_at) {
         const { error: dropError } = await supabase

@@ -62,6 +62,7 @@ function RootLayoutNav() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
             <Stack.Screen name="new" options={{ title: 'Plan an adventure' }} />
+            <Stack.Screen name="custom" options={{ title: 'Add your own adventure' }} />
             <Stack.Screen name="adventure/[id]/index" options={{ title: 'Adventure' }} />
             <Stack.Screen name="adventure/[id]/album" options={{ title: 'Album' }} />
             <Stack.Screen name="adventure/[id]/stop/[stopId]" options={{ title: 'Stop' }} />
