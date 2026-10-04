@@ -109,16 +109,14 @@ Deno.serve(async (req) => {
       : input.start;
 
     // locationBias is a soft ranking hint, not a hard radius restriction - for an unusual or rare
-    // query Google may return its best match from well outside the requested circle. Prefer
-    // candidates within the intended radius, but if none qualify, fall back to the closest raw
-    // results rather than erroring - a MicroQuest should almost always find something.
-    let candidates = await searchCandidates(interpretation.queries, center, interpretation.radius_km);
-
-    // The LLM's chosen queries occasionally find nothing at all (an overly specific or locally
-    // nonexistent category) - fall back to broad, almost-always-populated terms over a wider
-    // radius before giving up entirely.
-    if (candidates.length === 0) {
-      candidates = await searchCandidates(
+    // query (e.g. "public art installation") Google can return its single best global match
+    // instead of nothing, which looks like a real candidate but can be thousands of km away.
+    // Always run a broad, almost-always-locally-populated search alongside the LLM's categorized
+    // queries (rather than only when the categorized search comes back completely empty) so a
+    // single bad/rare query can't crowd out genuinely close common places.
+    const [categorized, broad] = await Promise.all([
+      searchCandidates(interpretation.queries, center, interpretation.radius_km),
+      searchCandidates(
         [
           { category: "general", query: "point of interest", max_results: 5 },
           { category: "general", query: "park", max_results: 3 },
@@ -126,8 +124,13 @@ Deno.serve(async (req) => {
         ],
         center,
         interpretation.radius_km * 3
-      );
+      ),
+    ]);
+    const candidatesById = new Map(categorized.map((c) => [c.place_id, c]));
+    for (const c of broad) {
+      if (!candidatesById.has(c.place_id)) candidatesById.set(c.place_id, c);
     }
+    const candidates = Array.from(candidatesById.values());
 
     if (candidates.length === 0) {
       return jsonResponse(
@@ -175,12 +178,35 @@ Deno.serve(async (req) => {
       (c) => c.walk_minutes_from_start == null || c.walk_minutes_from_start <= maxOneWayMinutes
     );
 
+    // If nothing fits, the closest-by-walk-time fallback below is a reasonable rescue for a
+    // near-miss (e.g. 15% over budget due to routing quirks) but must not be allowed to reach
+    // arbitrarily far - otherwise a sparse area (e.g. no cafes/parks within an academic quad)
+    // silently produces a plan that blows past the user's stated time, like sending a "10 minute
+    // walk" request 48 minutes away to the nearest park Google knows about.
+    const BEST_EFFORT_TOLERANCE = 2.5;
+    const closestByWalkTime = [...candidatesWithWalkTime].sort(
+      (a, b) => (a.walk_minutes_from_start ?? Infinity) - (b.walk_minutes_from_start ?? Infinity)
+    );
+    const bestEffortFeasible =
+      closestByWalkTime.length > 0 &&
+      (closestByWalkTime[0].walk_minutes_from_start ?? Infinity) <= maxOneWayMinutes * BEST_EFFORT_TOLERANCE;
+
     const filteredCandidates =
       withinTimeBudget.length > 0
         ? withinTimeBudget
-        : [...candidatesWithWalkTime]
-            .sort((a, b) => (a.walk_minutes_from_start ?? Infinity) - (b.walk_minutes_from_start ?? Infinity))
-            .slice(0, CLOSEST_FALLBACK_COUNT);
+        : bestEffortFeasible
+          ? closestByWalkTime.slice(0, CLOSEST_FALLBACK_COUNT)
+          : [];
+
+    if (filteredCandidates.length === 0) {
+      return jsonResponse(
+        {
+          error:
+            "Couldn't find anything within that time budget nearby. Try a longer time limit or a different starting point.",
+        },
+        422
+      );
+    }
 
     const candidateIds = new Set(filteredCandidates.map((c) => c.place_id));
     const categoryByPlaceId = new Map(filteredCandidates.map((c) => [c.place_id, c.category]));

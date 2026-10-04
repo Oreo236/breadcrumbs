@@ -53,6 +53,10 @@ async function searchOneQuery(
     body: JSON.stringify({
       textQuery: query,
       maxResultCount: Math.max(maxResults * 3, 5), // overfetch, then cap per-category below
+      // RELEVANCE (the default) can rank a popular/well-known place ahead of something genuinely
+      // around the corner - for a walking MicroQuest we want the literal closest match, not the
+      // most famous one, so DISTANCE ranking is required for locationBias to behave as intended.
+      rankPreference: "DISTANCE",
       locationBias: {
         circle: {
           center: { latitude: center.lat, longitude: center.lng },

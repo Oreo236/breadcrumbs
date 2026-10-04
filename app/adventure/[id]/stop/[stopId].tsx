@@ -134,12 +134,14 @@ export default function StopScreen() {
         .upload(path, arrayBuffer, { contentType: asset.mimeType ?? 'image/jpeg' });
       if (uploadError) throw uploadError;
 
-      const { error: insertError } = await supabase.from('photos').insert({
-        adventure_id: stop.adventure_id,
-        stop_id: stop.id,
-        user_id: session.user.id,
-        storage_path: path,
-      });
+      const { error: insertError } = await supabase
+        .from('photos')
+        .insert({
+          adventure_id: stop.adventure_id,
+          stop_id: stop.id,
+          user_id: session.user.id,
+          storage_path: path,
+        });
       if (insertError) throw insertError;
 
       if (!stop.dropped_at) {
@@ -272,5 +274,5 @@ const styles = StyleSheet.create({
   photoButtonText: { fontFamily: typography.bodyBold, color: colors.primary },
   photoCount: { fontFamily: typography.body, color: colors.toast, marginTop: spacing.sm },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  photoThumb: { width: '31%', aspectRatio: 1, borderRadius: radius.sm, backgroundColor: colors.outline },
+  photoThumb: { width: 100, height: 100, borderRadius: radius.sm, backgroundColor: colors.outline },
 });
