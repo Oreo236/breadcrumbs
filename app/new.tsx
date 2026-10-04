@@ -17,9 +17,26 @@ import { supabase } from '@/lib/supabase';
 
 type Coords = { lat: number; lng: number };
 
+// Quick-select chips; their text is appended to whatever the user typed when generating.
+const TIME_OPTIONS = ['15 minutes', '30 minutes', '1 hour', '2 hours', '3 hours'];
+const BUDGET_OPTIONS = ['free', '$10', '$25', '$50+'];
+const VIBE_OPTIONS = ['relaxing', 'food', 'cozy', 'scenic', 'shopping', 'exploring', 'active'];
+
+function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.chip, selected ? styles.chipSelected : null]} onPress={onPress}>
+      <Text style={[styles.chipText, selected ? styles.chipTextSelected : null]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export default function NewAdventureScreen() {
   const router = useRouter();
   const [prompt, setPrompt] = useState('');
+  const [time, setTime] = useState<string | null>(null);
+  const [budget, setBudget] = useState<string | null>(null);
+  const [vibes, setVibes] = useState<string[]>([]);
+  const [surprise, setSurprise] = useState(false);
   const [coords, setCoords] = useState<Coords | null>(null);
   const [cityInput, setCityInput] = useState('');
   const [locating, setLocating] = useState(false);
@@ -86,9 +103,24 @@ export default function NewAdventureScreen() {
     }
   }
 
+  function buildPrompt() {
+    const parts: string[] = [];
+    if (prompt.trim()) parts.push(prompt.trim());
+    if (time) parts.push(`I have ${time}.`);
+    if (budget) parts.push(budget === 'free' ? 'Budget: free.' : `Budget: ${budget}.`);
+    if (vibes.length > 0) parts.push(`I'm in the mood for: ${vibes.join(', ')}.`);
+    if (surprise) parts.push('Surprise me - mix different kinds of places, not just one type.');
+    return parts.join(' ');
+  }
+
+  function toggleVibe(v: string) {
+    setVibes((current) => (current.includes(v) ? current.filter((x) => x !== v) : [...current, v]));
+  }
+
   async function handleGenerate() {
-    if (!prompt.trim()) {
-      setError('Describe your adventure first (time, budget, interests).');
+    const fullPrompt = buildPrompt();
+    if (!fullPrompt) {
+      setError('Describe your adventure or pick a few options first (time, budget, vibe).');
       return;
     }
     if (!coords) {
@@ -100,7 +132,7 @@ export default function NewAdventureScreen() {
     setError(null);
     try {
       const { data, error: fnError } = await supabase.functions.invoke('generate-adventure', {
-        body: { prompt: prompt.trim(), start: coords, destination: endCoords ?? null },
+        body: { prompt: fullPrompt, start: coords, destination: endCoords ?? null },
       });
 
       if (fnError) {
@@ -147,6 +179,28 @@ export default function NewAdventureScreen() {
             multiline
             numberOfLines={4}
           />
+
+          <Text style={styles.label}>How much time?</Text>
+          <View style={styles.chipRow}>
+            {TIME_OPTIONS.map((o) => (
+              <Chip key={o} label={o} selected={time === o} onPress={() => setTime(time === o ? null : o)} />
+            ))}
+          </View>
+
+          <Text style={styles.label}>Budget</Text>
+          <View style={styles.chipRow}>
+            {BUDGET_OPTIONS.map((o) => (
+              <Chip key={o} label={o} selected={budget === o} onPress={() => setBudget(budget === o ? null : o)} />
+            ))}
+          </View>
+
+          <Text style={styles.label}>Vibe</Text>
+          <View style={styles.chipRow}>
+            {VIBE_OPTIONS.map((o) => (
+              <Chip key={o} label={o} selected={vibes.includes(o)} onPress={() => toggleVibe(o)} />
+            ))}
+            <Chip label="🎲 Surprise me" selected={surprise} onPress={() => setSurprise((v) => !v)} />
+          </View>
 
           <Text style={styles.label}>Starting point</Text>
           {coords ? (
@@ -252,6 +306,18 @@ export default function NewAdventureScreen() {
 }
 
 const styles = StyleSheet.create({
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+  },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontFamily: typography.bodyBold, fontSize: 14, color: colors.ink },
+  chipTextSelected: { color: colors.white },
   container: { flex: 1, backgroundColor: colors.cream },
   scroll: { padding: spacing.lg, gap: spacing.sm },
   label: {
