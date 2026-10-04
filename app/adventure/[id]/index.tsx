@@ -54,6 +54,7 @@ export default function AdventureScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -93,6 +94,57 @@ export default function AdventureScreen() {
       load().finally(() => setLoading(false));
     }, [load])
   );
+
+  function handleDelete() {
+    if (!adventure) return;
+    Alert.alert(
+      'Delete this adventure?',
+      'This permanently deletes the adventure, its stops and all photos for everyone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              // 1. Remove photo files from Storage first (needs the rows to find the paths).
+              const { data: photoRows, error: photosError } = await supabase
+                .from('photos')
+                .select('storage_path')
+                .eq('adventure_id', adventure.id);
+              if (photosError) throw photosError;
+              const paths = (photoRows ?? []).map((p) => p.storage_path);
+              if (paths.length > 0) {
+                const { data: removed, error: removeError } = await supabase.storage
+                  .from('photos')
+                  .remove(paths);
+                if (removeError) throw removeError;
+                if ((removed?.length ?? 0) < paths.length) {
+                  throw new Error('Could not delete all photo files (is migration 0002 applied?).');
+                }
+              }
+              // 2. Delete the adventure; stops/members/photos rows cascade.
+              const { data: deleted, error: deleteError } = await supabase
+                .from('adventures')
+                .delete()
+                .eq('id', adventure.id)
+                .select('id');
+              if (deleteError) throw deleteError;
+              if (!deleted || deleted.length === 0) {
+                throw new Error('Delete was blocked (is migration 0002 applied?).');
+              }
+              router.replace('/');
+            } catch (e) {
+              Alert.alert('Could not delete adventure', e instanceof Error ? e.message : 'Something went wrong');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   async function handleFinish() {
     if (!adventure) return;
@@ -267,6 +319,16 @@ export default function AdventureScreen() {
               <Text style={styles.finishButtonText}>View album</Text>
             </Pressable>
           ) : null}
+
+          {isOwner ? (
+            <Pressable style={styles.deleteButton} onPress={handleDelete} disabled={deleting}>
+              {deleting ? (
+                <ActivityIndicator color={colors.danger} />
+              ) : (
+                <Text style={styles.deleteButtonText}>Delete adventure</Text>
+              )}
+            </Pressable>
+          ) : null}
         </ScrollView>
       </SafeAreaView>
     </>
@@ -274,6 +336,16 @@ export default function AdventureScreen() {
 }
 
 const styles = StyleSheet.create({
+  deleteButton: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  deleteButtonText: { fontFamily: typography.bodyBold, color: colors.danger, fontSize: 15 },
   container: { flex: 1, backgroundColor: colors.cream },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
   errorText: { color: colors.danger, fontFamily: typography.body, padding: spacing.lg, textAlign: 'center' },
