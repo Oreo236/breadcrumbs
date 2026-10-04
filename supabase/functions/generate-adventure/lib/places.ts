@@ -52,7 +52,7 @@ async function searchOneQuery(
     },
     body: JSON.stringify({
       textQuery: query,
-      maxResultCount: Math.max(maxResults * 3, 5), // overfetch, then cap per-category below
+      maxResultCount: Math.max(maxResults * 3, 10), // overfetch, then cap per-category below
       // RELEVANCE (the default) can rank a popular/well-known place ahead of something genuinely
       // around the corner - for a walking MicroQuest we want the literal closest match, not the
       // most famous one, so DISTANCE ranking is required for locationBias to behave as intended.
@@ -73,11 +73,20 @@ async function searchOneQuery(
 
   const data: TextSearchResponse = await res.json();
 
+  // DISTANCE ranking sorts matches by proximity, not quality of match - with max_results as low
+  // as 1 (common for a single-category query) that can keep a loosely-matching but slightly
+  // closer place (e.g. a waterfall tagged "nature") while discarding the actual best-named match
+  // for the query (e.g. a real botanical garden a few hundred meters further). Always keep at
+  // least a few raw results per category so the planning LLM - which is much better at judging
+  // which result actually fits the query - has real options to choose from, not just whichever
+  // happened to be nearest.
+  const keepCount = Math.max(maxResults, 3);
+
   return (data.places ?? [])
     .filter((p) => p.businessStatus === undefined || p.businessStatus === "OPERATIONAL")
     .filter((p) => p.currentOpeningHours?.openNow !== false)
     .filter((p) => p.location && p.displayName)
-    .slice(0, maxResults)
+    .slice(0, keepCount)
     .map((p) => ({
       place_id: p.id,
       name: p.displayName!.text,
