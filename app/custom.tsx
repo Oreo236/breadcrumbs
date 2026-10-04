@@ -25,6 +25,8 @@ import { readExifGps, readExifTime } from '@/lib/exif';
 import { uploadStopPhoto } from '@/lib/uploadPhoto';
 import { generateId } from '@/lib/id';
 
+type Mode = 'planning' | 'went';
+
 type LocalPhoto = { uri: string; mimeType: string | null; takenAt: Date | null };
 
 type DraftStop = {
@@ -69,6 +71,8 @@ async function suggestName(lat: number, lng: number): Promise<string | null> {
 export default function CustomAdventureScreen() {
   const router = useRouter();
   const { session } = useAuth();
+  const [mode, setMode] = useState<Mode>('went');
+  const planning = mode === 'planning';
   const [title, setTitle] = useState('');
   const [stops, setStops] = useState<DraftStop[]>([newStop()]);
   const [saving, setSaving] = useState(false);
@@ -131,7 +135,8 @@ export default function CustomAdventureScreen() {
     patchStop(key, (s) => {
       const fill = !s.lat && gps;
       return {
-        photos: [...s.photos, ...photos],
+        // Planning a trip: photos are only used to read a location, never kept or uploaded.
+        photos: planning ? s.photos : [...s.photos, ...photos],
         ...(fill ? { lat: gps.lat, lng: gps.lng, locationSource: 'photo' as const } : {}),
       };
     });
@@ -201,7 +206,7 @@ export default function CustomAdventureScreen() {
         return;
       }
       if (s.lat == null || s.lng == null) {
-        setError(`Stop ${i + 1} ("${s.name.trim()}") needs a location: add a photo with GPS, type an address, or use your current location.`);
+        setError(`Stop ${i + 1} ("${s.name.trim()}") needs a location: ${planning ? 'type an address or use your current location' : 'add a photo with GPS, type an address, or use your current location'}.`);
         return;
       }
     }
@@ -217,9 +222,9 @@ export default function CustomAdventureScreen() {
           .insert({
             owner_id: userId,
             title: title.trim(),
-            summary: 'A custom adventure.',
+            summary: planning ? 'A planned adventure.' : 'A custom adventure.',
             prompt: `Custom adventure: ${title.trim()}`,
-            constraints: { custom: true },
+            constraints: { custom: true, mode },
             start_lat: stops[0].lat,
             start_lng: stops[0].lng,
             route_polyline: null,
@@ -259,14 +264,16 @@ export default function CustomAdventureScreen() {
       if (stopsError) throw stopsError;
 
       // Upload photos and mark those stops as dropped Breadcrumbs.
-      const totalPhotos = stops.reduce((n, s) => n + s.photos.length, 0);
+      // Planning mode: nothing is uploaded or dropped; Breadcrumbs get dropped later from the stop screen.
+      const uploadStops = planning ? stops.map((s) => ({ ...s, photos: [] as LocalPhoto[] })) : stops;
+      const totalPhotos = uploadStops.reduce((n, s) => n + s.photos.length, 0);
       let done = 0;
       let failed = 0;
       for (let i = 0; i < stops.length; i++) {
         const row = insertedStops?.find((r) => r.order_index === i);
-        if (!row || stops[i].photos.length === 0) continue;
+        if (!row || uploadStops[i].photos.length === 0) continue;
         let uploadedAny = false;
-        for (const photo of stops[i].photos) {
+        for (const photo of uploadStops[i].photos) {
           setProgress(`Uploading photo ${done + 1} of ${totalPhotos}…`);
           try {
             await uploadStopPhoto({
@@ -314,6 +321,26 @@ export default function CustomAdventureScreen() {
       <Stack.Screen options={{ title: 'Add your own adventure' }} />
       <SafeAreaView style={styles.container} edges={['bottom']}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.modeRow}>
+            {([
+              ['went', '📸 Already went'],
+              ['planning', '🗺️ Planning a trip'],
+            ] as const).map(([value, label]) => (
+              <Pressable
+                key={value}
+                style={[styles.modeOption, mode === value ? styles.modeOptionSelected : null]}
+                onPress={() => setMode(value)}
+              >
+                <Text style={[styles.modeText, mode === value ? styles.modeTextSelected : null]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.modeHint}>
+            {planning
+              ? "Add the places you'll go. Drop Breadcrumbs later by taking photos at each stop."
+              : 'Add places you already visited with photos. Stops with photos become dropped Breadcrumbs.'}
+          </Text>
+
           <Text style={styles.label}>Adventure title</Text>
           <TextInput
             value={title}
@@ -358,10 +385,16 @@ export default function CustomAdventureScreen() {
                 style={styles.input}
               />
 
-              <Pressable style={styles.secondaryButton} onPress={() => pickPhotos(s.key)}>
-                <Text style={styles.secondaryButtonText}>🖼️ Add photos (reads location)</Text>
-              </Pressable>
-              {s.photos.length > 0 ? (
+              {planning ? (
+                <Pressable onPress={() => pickPhotos(s.key)}>
+                  <Text style={styles.link}>🖼️ Use a photo&apos;s location (optional, the photo isn&apos;t saved)</Text>
+                </Pressable>
+              ) : (
+                <Pressable style={styles.secondaryButton} onPress={() => pickPhotos(s.key)}>
+                  <Text style={styles.secondaryButtonText}>🖼️ Add photos (reads location)</Text>
+                </Pressable>
+              )}
+              {!planning && s.photos.length > 0 ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.xs }}>
                   {s.photos.map((p, pi) => (
                     <View key={`${p.uri}-${pi}`}>
@@ -417,7 +450,7 @@ export default function CustomAdventureScreen() {
           <Pressable style={styles.addStop} onPress={() => setStops((cur) => [...cur, newStop()])}>
             <Text style={styles.addStopText}>+ Add another stop</Text>
           </Pressable>
-          {stops.length > 1 ? (
+          {!planning && stops.length > 1 ? (
             <Pressable onPress={sortByPhotoTime}>
               <Text style={styles.link}>🕒 Sort stops by photo time</Text>
             </Pressable>
@@ -438,6 +471,19 @@ export default function CustomAdventureScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.cream },
   scroll: { padding: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xl * 2 },
+  modeRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.white,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    padding: 3,
+  },
+  modeOption: { flex: 1, paddingVertical: spacing.sm, borderRadius: radius.pill, alignItems: 'center' },
+  modeOptionSelected: { backgroundColor: colors.primary },
+  modeText: { fontFamily: typography.bodyBold, color: colors.toast, fontSize: 14 },
+  modeTextSelected: { color: colors.white },
+  modeHint: { fontFamily: typography.body, fontSize: 13, color: colors.toast, marginBottom: spacing.xs },
   label: { fontFamily: typography.bodyBold, fontSize: 15, color: colors.ink },
   input: {
     backgroundColor: colors.white,
