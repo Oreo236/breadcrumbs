@@ -35,7 +35,7 @@ type StopDetail = {
   dropped_at: string | null;
 };
 
-type PhotoItem = { id: string; storage_path: string; signedUrl: string | null };
+type PhotoItem = { id: string; storage_path: string; user_id: string; signedUrl: string | null };
 
 export default function StopScreen() {
   const { id, stopId } = useLocalSearchParams<{ id: string; stopId: string }>();
@@ -46,6 +46,7 @@ export default function StopScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [adventureOwnerId, setAdventureOwnerId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -61,9 +62,16 @@ export default function StopScreen() {
     }
     setStop(stopData);
 
+    const { data: adventureRow } = await supabase
+      .from('adventures')
+      .select('owner_id')
+      .eq('id', stopData.adventure_id)
+      .single();
+    setAdventureOwnerId(adventureRow?.owner_id ?? null);
+
     const { data: photoRows, error: photoError } = await supabase
       .from('photos')
-      .select('id, storage_path')
+      .select('id, storage_path, user_id')
       .eq('stop_id', stopId)
       .order('created_at', { ascending: false });
 
@@ -75,7 +83,7 @@ export default function StopScreen() {
     const withUrls = await Promise.all(
       (photoRows ?? []).map(async (p) => {
         const { data } = await supabase.storage.from('photos').createSignedUrl(p.storage_path, 3600);
-        return { id: p.id, storage_path: p.storage_path, signedUrl: data?.signedUrl ?? null };
+        return { id: p.id, storage_path: p.storage_path, user_id: p.user_id, signedUrl: data?.signedUrl ?? null };
       })
     );
     setPhotos(withUrls);
@@ -98,6 +106,43 @@ export default function StopScreen() {
     Linking.openURL(url).catch(() =>
       Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}`)
     );
+  }
+
+  function canDelete(photo: PhotoItem) {
+    return !!session && (photo.user_id === session.user.id || adventureOwnerId === session.user.id);
+  }
+
+  function confirmDeletePhoto(photo: PhotoItem) {
+    if (!canDelete(photo)) return;
+    Alert.alert('Delete this photo?', "This can't be undone.", [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deletePhoto(photo) },
+    ]);
+  }
+
+  async function deletePhoto(photo: PhotoItem) {
+    if (!stop) return;
+    try {
+      // Storage first: the storage delete policy looks up the photos row, so the row must still exist.
+      const { data: removed, error: removeError } = await supabase.storage
+        .from('photos')
+        .remove([photo.storage_path]);
+      if (removeError) throw removeError;
+      if (!removed || removed.length === 0) {
+        throw new Error('Delete was blocked (is migration 0002 applied?).');
+      }
+
+      const { error: rowError } = await supabase.from('photos').delete().eq('id', photo.id);
+      if (rowError) throw rowError;
+
+      // A dropped Breadcrumb should always have a photo: un-drop the stop if that was the last one.
+      if (photos.length === 1 && stop.dropped_at) {
+        await supabase.from('stops').update({ dropped_at: null, dropped_by: null }).eq('id', stop.id);
+      }
+      await load();
+    } catch (e) {
+      Alert.alert('Could not delete photo', e instanceof Error ? e.message : 'Something went wrong');
+    }
   }
 
   async function addPhoto(fromCamera: boolean) {
@@ -222,7 +267,14 @@ export default function StopScreen() {
           <View style={styles.photoGrid}>
             {photos.map((p) =>
               p.signedUrl ? (
-                <Image key={p.id} source={{ uri: p.signedUrl }} style={styles.photoThumb} contentFit="cover" />
+                <Pressable key={p.id} onLongPress={() => confirmDeletePhoto(p)} delayLongPress={400}>
+                  <Image source={{ uri: p.signedUrl }} style={styles.photoThumb} contentFit="cover" />
+                  {canDelete(p) ? (
+                    <Pressable style={styles.photoDelete} onPress={() => confirmDeletePhoto(p)} hitSlop={8}>
+                      <Text style={styles.photoDeleteText}>✕</Text>
+                    </Pressable>
+                  ) : null}
+                </Pressable>
               ) : null
             )}
           </View>
@@ -274,5 +326,17 @@ const styles = StyleSheet.create({
   photoButtonText: { fontFamily: typography.bodyBold, color: colors.primary },
   photoCount: { fontFamily: typography.body, color: colors.toast, marginTop: spacing.sm },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  photoDelete: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(43,27,18,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoDeleteText: { color: colors.white, fontSize: 12, fontFamily: typography.bodyBold },
   photoThumb: { width: 100, height: 100, borderRadius: radius.sm, backgroundColor: colors.outline },
 });
